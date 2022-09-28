@@ -40,12 +40,12 @@ func NewRPCServer(name string, impl interface{}, dispatcher Dispatcher, opts ...
         impl: impl,
         dispatcher: dispatcher,
     }
-    srv.opts = loadServerOptions(opts...)
+    srv.opts = loadServerOptions(name, opts...)
     return srv
 }
 
 func (srv *TcpServer)Start() error {
-    listen, err := net.Listen("tcp", srv.opts.Addr)
+    listen, err := net.Listen("tcp", srv.opts.addr)
     if err != nil {
         return err
     }
@@ -173,8 +173,8 @@ func (conn *tcpConn) handle() {
     defer conn.close()
 
     var (
-        buf = make([]byte, 0, defaultReadBufSize)
-        readBuf = make([]byte, conn.srv.opts.ReadSize)
+        buf = make([]byte, 0, conn.srv.opts.readSize)
+        readBuf = make([]byte, conn.srv.opts.readSize)
     )
 
     for {
@@ -226,32 +226,39 @@ func (conn *tcpConn)invoke(body []byte) {
 
     req, err := conn.srv.protocol.UnPacketRequest(body)
     if err != nil {
-        logx.Log(logx.Kv("message", "unpacket failed"), logx.Kv("protocol", conn.srv.protocol.Name()), logx.Kv("error", err.Error()))
+        logx.Log(logx.Kv("message", "unpacket failed"), logx.Kv("protocol", conn.srv.protocol.Name()), logx.Kv("error", err))
         return
     }
+
+    var resp *Response
     encName := req.Meta.Get(EncodeType)
     start := time.Now()
     defer func() {
         interval := time.Now().Sub(start)
-        logx.Log(logx.Kv("message", "request call time"), logx.Kv("protocol", conn.srv.protocol.Name()), logx.Kv("server", conn.srv.Name()), logx.Kv("method", req.Method), logx.Kv("interval", int32(interval/time.Millisecond)), logx.Kv("encoder", encName), logx.Kv("spend", interval.String()))
+        desc := ""
+        code := int32(0)
+        if resp != nil {
+            code = resp.Code
+            desc = resp.CodeStatus
+        }
+        logx.Log(logx.Kv("message", "request call time"), logx.Kv("protocol", conn.srv.protocol.Name()), logx.Kv("server", conn.srv.Name()), logx.Kv("method", req.Method), logx.Kv("interval", int32(interval/time.Millisecond)), logx.Kv("code", code), logx.Kv("status", desc), logx.Kv("encoder", encName), logx.Kv("spend", interval.String()))
     }()
 
     ctx := NewOutgoingContext(context.TODO(), req.Meta)
     var cancel context.CancelFunc
-    if conn.srv.opts.InvokeTimeout > 0 {
-        ctx, cancel = context.WithTimeout(ctx, conn.srv.opts.InvokeTimeout)
+    if conn.srv.opts.invokeTimeout > 0 {
+        ctx, cancel = context.WithTimeout(ctx, conn.srv.opts.invokeTimeout)
     }
     if cancel != nil {
         defer cancel()
     }
 
-    var resp *Response
     select {
     case <- ctx.Done():
         resp = GetResponse(req, nil, uerror.ErrRequestFull)
-    case conn.srv.opts.Tick <- struct{}{}:
+    case conn.srv.opts.tick <- struct{}{}:
         defer func() {
-            <- conn.srv.opts.Tick
+            <- conn.srv.opts.tick
         }()
     }
 

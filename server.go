@@ -19,37 +19,39 @@ type Server interface {
 }
 
 type ServerOptions struct {
-    Addr          string
-    MaxInvoke     int32
-    InvokeTimeout time.Duration
-    ReadSize      int
-    Tick          chan struct{}
+    addr          string
+    maxInvoke     int32
+    invokeTimeout time.Duration
+    readSize      int32
+    tick          chan struct{}
 }
 
-func loadServerOptions(opts ...ServerOption) *ServerOptions {
+func loadServerOptions(name string, opts ...ServerOption) *ServerOptions {
+    cfg := GetServerConfig(name)
     option := &ServerOptions{
-        ReadSize: defaultReadBufSize,
-        MaxInvoke: defaultMaxInvoke,
+        readSize: cfg.ReadBufferSize,
+        maxInvoke: cfg.MaxInvoke,
+        addr: ":"+cfg.Port,
     }
 
     for _, opt := range opts {
         opt(option)
     }
 
-    option.Tick = make(chan struct{}, option.MaxInvoke)
+    option.tick = make(chan struct{}, option.maxInvoke)
     return option
 }
 
 type ServerOption func(opt *ServerOptions)
 
-func WithServerOptionReadSize(size int) ServerOption {
+func WithServerOptionReadSize(size int32) ServerOption {
     return func(opt *ServerOptions) {
-        opt.ReadSize = size
+        opt.readSize = size
     }
 }
 
 func WithServerOptionAddr(addr string) ServerOption {
     return func(opt *ServerOptions) {
-        opt.Addr = addr
+        opt.addr = addr
     }
 }

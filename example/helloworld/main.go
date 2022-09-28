@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-    server := pb.NewHelloServer("HelloServer", &handler.HelloServerImpl{}, wrpcgo.WithServerOptionAddr(":9092"))
+    server := pb.NewHelloServer("HelloServer", &handler.HelloServerImpl{})
     app := wrpcgo.NewApp(wrpcgo.WithServer(server))
     logx.Log("start service")
     if err := app.Run(); err != nil {

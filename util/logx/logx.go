@@ -83,6 +83,10 @@ func (f *Field) String() string {
         return "\"" + f.key + "\":\"" + *v + "\""
     case []byte:
         return "\"" + f.key + "\":\"" + string(v) + "\""
+    case error:
+        return "\"" + f.key + "\":\"" + v.Error() + "\""
+    case *error:
+        return "\"" + f.key + "\":\"" + (*v).Error() + "\""
     default:
         bs, err := json.Marshal(v)
         if err != nil {

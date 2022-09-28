@@ -27,10 +27,11 @@ func nextRequestId() int32 {
 type ClientOptions struct {
     addr           string
     maxConn        int
-    RequestTimeout time.Duration
-    maxLiveTime    time.Duration
-    ReadSize       int32
-    EncodeType     string
+    requestTimeout time.Duration
+    maxIdleTime    time.Duration
+    readSize       int32
+    encodeType     string
+    reTry          int
 }
 
 type ClientOption func(opt *ClientOptions)
@@ -49,17 +50,19 @@ func WithClientOptionMaxConn(max int) ClientOption {
 
 func WithClientOptionEncodeType(encodeType string) ClientOption {
     return func(opt *ClientOptions) {
-        opt.EncodeType = encodeType
+        opt.encodeType = encodeType
     }
 }
 
 func loadClientOptions(opts ...ClientOption) *ClientOptions {
+    cfg := GetClientConfig()
     options := &ClientOptions{
-        RequestTimeout: time.Second*3,
-        ReadSize: defaultReadBufSize,
-        maxConn: 1,
-        maxLiveTime: time.Hour*2,
-        EncodeType: _encoder_json,
+        requestTimeout: cfg.RequestTimeout,
+        readSize: cfg.ReadBufferSize,
+        maxConn: cfg.Thread,
+        maxIdleTime: cfg.MaxIdleTime,
+        encodeType: cfg.EncodeType,
+        reTry: cfg.ReTry,
     }
     for _, opt := range opts {
         opt(options)
@@ -74,7 +77,8 @@ type Client struct {
     protocol Protocol
     idx int
     connectors []*connector
-    reqMap sync.Map
+    reqMap map[int32]chan *Response
+    rwLock sync.Mutex
 }
 
 func NewClient(name string, opts ...ClientOption) *Client {
@@ -82,6 +86,7 @@ func NewClient(name string, opts ...ClientOption) *Client {
         name: name,
         protocol: newWRPCProtocol(),
         connectors: make([]*connector, 0),
+        reqMap: make(map[int32]chan *Response),
     }
     client.opts = loadClientOptions(opts...)
     client.initConnect()
@@ -132,8 +137,8 @@ func (client *Client)connector(addr string) *connector {
 
 func (client *Client)Invoke(ctx context.Context, encName, addr, method string, in []byte, opt ...map[string]string) ([]byte, error) {
     var cancel context.CancelFunc
-    if client.opts.RequestTimeout > 0 {
-        ctx, cancel = context.WithTimeout(ctx, client.opts.RequestTimeout)
+    if client.opts.requestTimeout > 0 {
+        ctx, cancel = context.WithTimeout(ctx, client.opts.requestTimeout)
         defer cancel()
     }
     metadata, ok := FromOutgoingContext(ctx)
@@ -141,7 +146,7 @@ func (client *Client)Invoke(ctx context.Context, encName, addr, method string, i
         metadata = make(map[string]string)
     }
     if encName == "" {
-        encName = client.opts.EncodeType
+        encName = client.opts.encodeType
     }
     metadata.Set(EncodeType, encName)
     req := &Request{
@@ -155,13 +160,49 @@ func (client *Client)Invoke(ctx context.Context, encName, addr, method string, i
         return nil, err
     }
 
-    respChan := make(chan *Response)
-    client.reqMap.Store(req.RequestId, respChan)
+    respChan := make(chan *Response, 1)
+    client.rwLock.Lock()
+    client.reqMap[req.RequestId] = respChan
+    client.rwLock.Unlock()
 
-    for i := 0; i < 2; i++ {
+    err = client.sendRequest(addr, bs)
+    if err != nil {
+        client.rwLock.Lock()
+        delete(client.reqMap, req.RequestId)
+        close(respChan)
+        client.rwLock.Unlock()
+        return nil, err
+    }
+
+    select {
+    case <- ctx.Done():
+        client.rwLock.Lock()
+        delete(client.reqMap, req.RequestId)
+        close(respChan)
+        client.rwLock.Unlock()
+        return nil, uerror.ErrRequestTimeout
+    case resp, ok := <- respChan:
+        if !ok {
+            return nil, uerror.NewError(502, "chan is closed")
+        }
+        close(respChan)
+        if resp.Code > 0 && resp.Code != 200 {
+            return nil, uerror.NewError(resp.Code, resp.CodeStatus)
+        }
+        return resp.Body, nil
+    }
+}
+
+func (client *Client)sendRequest(addr string, bs []byte) error {
+    var err error
+    tryTime := client.opts.reTry
+    if tryTime <= 0 {
+        tryTime = 1
+    }
+    for i := 0; i < tryTime; i++ {
         connect := client.connector(addr)
         if connect == nil {
-            return nil, ErrConnectNotFound
+            return ErrConnectNotFound
         }
         conn, cerr := connect.getConn()
         if cerr != nil {
@@ -177,21 +218,7 @@ func (client *Client)Invoke(ctx context.Context, encName, addr, method string, i
         err = nil
         break
     }
-    if err != nil {
-        client.reqMap.Delete(req.RequestId)
-        return nil, err
-    }
-
-    select {
-    case <- ctx.Done():
-        client.reqMap.Delete(req.RequestId)
-        return nil, uerror.ErrRequestTimeout
-    case resp := <- respChan:
-        if resp.Code > 0 {
-            return nil, uerror.NewError(resp.Code, resp.ErrMsg)
-        }
-        return resp.Body, nil
-    }
+    return err
 }
 
 type connector struct {
@@ -308,8 +335,8 @@ func (conn *clientConn)reconnect() error {
 }
 
 func (conn *clientConn)expired() bool {
-    if conn.connect.client.opts.maxLiveTime > 0 {
-        return time.Now().Sub(conn.createAt) >= conn.connect.client.opts.maxLiveTime
+    if conn.connect.client.opts.maxIdleTime > 0 {
+        return time.Now().Sub(conn.createAt) >= conn.connect.client.opts.maxIdleTime
     }
     return false
 }
@@ -335,8 +362,8 @@ func (conn *clientConn)recv(rw net.Conn) {
     defer conn.close()
 
     var (
-        buf = make([]byte, 0, 8192)
-        readBuf = make([]byte, conn.connect.client.opts.ReadSize)
+        buf = make([]byte, 0, conn.connect.client.opts.readSize)
+        readBuf = make([]byte, conn.connect.client.opts.readSize)
     )
 
     for {
@@ -369,14 +396,13 @@ func (conn *clientConn)invoke(body []byte) {
     if err != nil {
         return
     }
-    val, ok := conn.connect.client.reqMap.Load(req.RequestId)
+    conn.connect.client.rwLock.Lock()
+    respChan, ok := conn.connect.client.reqMap[req.RequestId]
     if ok {
-        conn.connect.client.reqMap.Delete(req.RequestId)
-        respChan, rok := val.(chan *Response)
-        if rok {
-            respChan <- req
-        }
+        delete(conn.connect.client.reqMap, req.RequestId)
+        respChan <- req
     }
+    conn.connect.client.rwLock.Unlock()
 }
 
 func (conn *clientConn)send(pkg []byte) error {

@@ -1,0 +1,6 @@
+server-config:
+  - name: HelloServer
+    ip: 127.0.0.1
+    port: 9092
+client-config:
+  thread: 2
