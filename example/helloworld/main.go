@@ -10,8 +10,8 @@ import (
 func main() {
     server := pb.NewHelloServer("HelloServer", &handler.HelloServerImpl{})
     app := wrpcgo.NewApp(wrpcgo.WithServer(server))
-    logx.Log("start service")
+    logx.Logf("start service")
     if err := app.Run(); err != nil {
-        logx.Log("service start failed", err.Error())
+        logx.Logf("service start failed", err.Error())
     }
 }

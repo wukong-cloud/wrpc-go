@@ -1,3 +1,9 @@
+discover:
+  name: etcd
+  hosts: 127.0.0.1:2379
+register:
+  name: etcd
+  hosts: 127.0.0.1:2379
 server-config:
   - name: HelloServer
     ip: 127.0.0.1

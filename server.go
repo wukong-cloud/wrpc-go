@@ -2,6 +2,7 @@ package wrpc_go
 
 import (
     "context"
+    "github.com/wukong-cloud/wrpc-go/internal/register"
     "time"
 )
 
@@ -16,9 +17,12 @@ type Server interface {
     Start() error
     Stop(ctx context.Context) error
     Name() string
+    Target() *register.Target
 }
 
 type ServerOptions struct {
+    ip            string
+    port          string
     addr          string
     maxInvoke     int32
     invokeTimeout time.Duration
@@ -32,6 +36,8 @@ func loadServerOptions(name string, opts ...ServerOption) *ServerOptions {
         readSize: cfg.ReadBufferSize,
         maxInvoke: cfg.MaxInvoke,
         addr: ":"+cfg.Port,
+        ip: cfg.IP,
+        port: cfg.Port,
     }
 
     for _, opt := range opts {

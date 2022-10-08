@@ -2,6 +2,8 @@ package wrpc_go
 
 import (
     "flag"
+    "github.com/wukong-cloud/wrpc-go/internal/discovery"
+    "github.com/wukong-cloud/wrpc-go/internal/register"
     "github.com/wukong-cloud/wrpc-go/util/logx"
     "gopkg.in/yaml.v2"
     "io/ioutil"
@@ -11,6 +13,8 @@ import (
 )
 
 type Config struct {
+    DiscoverConfig *discovery.DiscoverConfig `yaml:"discover"`
+    RegisterConfig *register.RegisterConfig `yaml:"register"`
     ServerConfigs []*ServerConfig `yaml:"server-config"`
     ClientConfig  *ClientConfig   `yaml:"client-config"`
 }

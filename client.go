@@ -3,6 +3,8 @@ package wrpc_go
 import (
     "context"
     "fmt"
+    "github.com/wukong-cloud/wrpc-go/internal/discovery"
+    "github.com/wukong-cloud/wrpc-go/util/logx"
     "github.com/wukong-cloud/wrpc-go/util/uerror"
     "math"
     "net"
@@ -32,6 +34,7 @@ type ClientOptions struct {
     readSize       int32
     encodeType     string
     reTry          int
+    discover       discovery.Discover
 }
 
 type ClientOption func(opt *ClientOptions)
@@ -51,6 +54,12 @@ func WithClientOptionMaxConn(max int) ClientOption {
 func WithClientOptionEncodeType(encodeType string) ClientOption {
     return func(opt *ClientOptions) {
         opt.encodeType = encodeType
+    }
+}
+
+func WithClientOptionsDiscover(discover discovery.Discover) ClientOption {
+    return func(opt *ClientOptions) {
+        opt.discover = discover
     }
 }
 
@@ -79,31 +88,82 @@ type Client struct {
     connectors []*connector
     reqMap map[int32]chan *Response
     rwLock sync.Mutex
+    discover discovery.Discover
 }
 
 func NewClient(name string, opts ...ClientOption) *Client {
+    conf := GetConfig()
     client := &Client{
         name: name,
         protocol: newWRPCProtocol(),
         connectors: make([]*connector, 0),
         reqMap: make(map[int32]chan *Response),
+        discover: discovery.NewDiscover(conf.DiscoverConfig),
     }
     client.opts = loadClientOptions(opts...)
+    if client.opts.discover != nil {
+        client.discover = client.opts.discover
+    }
     client.initConnect()
     return client
 }
 
 func (client *Client)initConnect() {
     if client.opts.addr != "" {
-        addrs := strings.Split(client.opts.addr, ";")
-        for _, addr := range addrs {
-            addr := strings.TrimSpace(addr)
-            if addr == "" {
-                continue
-            }
-            connect := newConnector(client, addr, true)
-            client.connectors = append(client.connectors, connect)
+        client.updateConnector(client.opts.addr, true)
+    }
+    logx.Log(11111)
+    endpoints := client.discover.Find(client.name)
+    logx.Log(222, endpoints)
+    if len(endpoints) > 0 {
+        client.updateConnector(strings.Join(endpoints, ";"), false)
+    }
+}
+
+func (client *Client)updateConnector(addr string, isFixed bool) {
+    client.mu.Lock()
+
+    addrs := strings.Split(addr, ";")
+    oldConnectors := client.connectors
+    newConnectors := make([]*connector, 0)
+
+    for _, addr := range addrs {
+        addr := strings.TrimSpace(addr)
+        if addr == "" {
+            continue
         }
+        connect := newConnector(client, addr, isFixed)
+        newConnectors = append(newConnectors, connect)
+    }
+
+    delConnectoers := make([]*connector, 0)
+    for _, oldConn := range oldConnectors {
+        isFound := false
+        for _, newConn := range newConnectors {
+            if oldConn.addr == newConn.addr {
+                isFound = true
+                break
+            }
+        }
+        if isFound {
+            continue
+        }
+        if oldConn.isFixed {
+            newConnectors = append(newConnectors, oldConn)
+            continue
+        }
+        delConnectoers = append(delConnectoers, oldConn)
+    }
+
+    client.connectors = newConnectors
+    client.mu.Unlock()
+
+    if len(delConnectoers) > 0 {
+        go func() {
+            for _, delConn := range delConnectoers {
+                delConn.close()
+            }
+        }()
     }
 }
 
@@ -222,12 +282,13 @@ func (client *Client)sendRequest(addr string, bs []byte) error {
 }
 
 type connector struct {
-    addr   string
-    client *Client
-    nextId int32
-    idx   int
-    conns []*clientConn
-    mu    sync.Mutex
+    addr    string
+    client  *Client
+    nextId  int32
+    idx     int
+    conns   []*clientConn
+    mu      sync.Mutex
+    callNum int
     isFixed bool
 }
 
@@ -289,6 +350,12 @@ func (c *connector)removeConn(connId int32) {
     }
     c.conns = conns
     c.mu.Unlock()
+}
+
+func (c *connector)close() {
+    for _, conn := range c.conns {
+        conn.close()
+    }
 }
 
 type clientConn struct {

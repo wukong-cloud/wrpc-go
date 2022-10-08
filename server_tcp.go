@@ -4,6 +4,7 @@ import (
     "context"
     "encoding/binary"
     "fmt"
+    "github.com/wukong-cloud/wrpc-go/internal/register"
     "github.com/wukong-cloud/wrpc-go/util/logx"
     "github.com/wukong-cloud/wrpc-go/util/uerror"
     "net"
@@ -24,6 +25,8 @@ type TcpServer struct {
     mu sync.Mutex
     protocol Protocol
 
+    target *register.Target
+
     impl interface{}
     dispatcher Dispatcher
 
@@ -41,6 +44,11 @@ func NewRPCServer(name string, impl interface{}, dispatcher Dispatcher, opts ...
         dispatcher: dispatcher,
     }
     srv.opts = loadServerOptions(name, opts...)
+    srv.target = &register.Target{
+        Name: name,
+        IP: srv.opts.ip,
+        Port: srv.opts.port,
+    }
     return srv
 }
 
@@ -54,6 +62,9 @@ func (srv *TcpServer)Start() error {
         srv.mu.Unlock()
         return ErrServerIsRunning
     }
+
+    logx.Logf("start rpc server %s listen %s", srv.name, srv.opts.addr)
+
     srv.listen = listen
     srv.mu.Unlock()
 
@@ -62,7 +73,7 @@ func (srv *TcpServer)Start() error {
     for {
         rw, err := srv.listen.Accept()
         if err != nil {
-            logx.Log(logx.Kv("message", "listen accept failed"), logx.Kv("error", err.Error()))
+            logx.Logf("server %s listen accept failed:%v", err)
             select {
             case <- srv.getDoneChan():
                 return ErrServerIsClosed
@@ -109,6 +120,10 @@ func (srv *TcpServer)Stop(ctx context.Context) error {
 
 func (srv *TcpServer)Name() string {
     return srv.name
+}
+
+func (srv *TcpServer)Target() *register.Target {
+    return srv.target
 }
 
 func (srv *TcpServer)getDoneChan() <-chan struct{} {
@@ -241,7 +256,7 @@ func (conn *tcpConn)invoke(body []byte) {
             code = resp.Code
             desc = resp.CodeStatus
         }
-        logx.Log(logx.Kv("message", "request call time"), logx.Kv("protocol", conn.srv.protocol.Name()), logx.Kv("server", conn.srv.Name()), logx.Kv("method", req.Method), logx.Kv("interval", int32(interval/time.Millisecond)), logx.Kv("code", code), logx.Kv("status", desc), logx.Kv("encoder", encName), logx.Kv("spend", interval.String()))
+        logx.Log("request call time", logx.Kv("protocol", conn.srv.protocol.Name()), logx.Kv("server", conn.srv.Name()), logx.Kv("method", req.Method), logx.Kv("interval", int32(interval/time.Millisecond)), logx.Kv("code", code), logx.Kv("status", desc), logx.Kv("encoder", encName), logx.Kv("spend", interval.String()))
     }()
 
     ctx := NewOutgoingContext(context.TODO(), req.Meta)

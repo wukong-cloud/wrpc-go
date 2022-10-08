@@ -3,6 +3,7 @@ package wrpc_go
 import (
     "context"
     "fmt"
+    "github.com/wukong-cloud/wrpc-go/internal/register"
     "github.com/wukong-cloud/wrpc-go/util/logx"
     "sync"
     "time"
@@ -24,16 +25,25 @@ func WithServer(server Server) AppOption {
     })
 }
 
+func WithRegister(register register.Register) AppOption {
+    return AppOptionFunc(func(app *App) {
+        app.register = register
+    })
+}
+
 type App struct {
     serverMap map[string]Server
     stopChan chan struct{}
     wg sync.WaitGroup
+    register register.Register
 }
 
 func NewApp(opts ...AppOption) *App {
+    conf := GetConfig()
    app := &App{
        serverMap: make(map[string]Server),
        stopChan: make(chan struct{}),
+       register: register.NewRegister(conf.RegisterConfig),
    }
    for _, opt := range opts {
        opt.apply(app)
@@ -54,10 +64,14 @@ func (app *App)Run() error {
         go func() {
             defer app.wg.Done()
             if err := server.Start(); err != nil {
-                logx.Log(logx.Kv("message", "server stop"), logx.Kv("server", server.Name()), logx.Kv("error", err.Error()))
+                panic(fmt.Sprintf("start server %s failed:%+v", server.Name(), err))
                 return
             }
         }()
+    }
+    time.Sleep(time.Second)
+    for _, server := range app.serverMap {
+        app.register.Register(*server.Target())
     }
     return app.loop()
 }
@@ -67,9 +81,13 @@ func (app *App)loop() error {
     for {
         select {
         case <- timer.C:
-            logx.Log(logx.Kv("message", "keepAlive"))
+            logx.Log("keep alive")
+            for _, server := range app.serverMap {
+                app.register.KeepAlive(*server.Target())
+            }
         case <- app.stopChan:
             for _, server := range app.serverMap {
+                app.register.UnRegister(*server.Target())
                 server.Stop(context.TODO())
             }
             app.wg.Wait()

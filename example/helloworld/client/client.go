@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-    client := pb.NewHelloClient("HelloServer", wrpcgo.WithClientOptionAddr("127.0.0.1:9092"), wrpcgo.WithClientOptionMaxConn(2))
+    client := pb.NewHelloClient("HelloServer", wrpcgo.WithClientOptionMaxConn(2))
     var wg sync.WaitGroup
     for i := 0; i<10; i++ {
         wg.Add(1)

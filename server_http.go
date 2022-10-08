@@ -3,6 +3,7 @@ package wrpc_go
 import (
     "context"
     "fmt"
+    "github.com/wukong-cloud/wrpc-go/internal/register"
     "github.com/wukong-cloud/wrpc-go/util/logx"
     "net"
     "net/http"
@@ -19,6 +20,8 @@ type HttpServer struct {
     opts *ServerOptions
     mu sync.Mutex
     name string
+
+    target *register.Target
 }
 
 func NewHttpServer(name string, handler http.Handler, opts...ServerOption) *HttpServer {
@@ -30,14 +33,20 @@ func NewHttpServer(name string, handler http.Handler, opts...ServerOption) *Http
     }
     srv.opts = loadServerOptions(name, opts...)
     srv.Server.Addr = srv.opts.addr
+    srv.target = &register.Target{
+        Name: name,
+        IP: srv.opts.ip,
+        Port: srv.opts.port,
+    }
     return srv
 }
 
 func (srv *HttpServer)Start() error {
-    listen, err := net.Listen("tpc", srv.opts.addr)
+    listen, err := net.Listen("tcp", srv.opts.addr)
     if err != nil {
         return err
     }
+    logx.Logf("start http server %s listen %s", srv.name, srv.opts.addr)
     return srv.Serve(listen)
 }
 
@@ -47,6 +56,10 @@ func (srv *HttpServer)Stop(ctx context.Context) error {
 
 func (srv *HttpServer)Name() string {
     return srv.name
+}
+
+func (srv *HttpServer)Target() *register.Target {
+    return srv.target
 }
 
 func (srv *HttpServer)String() string {
