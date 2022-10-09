@@ -5,7 +5,6 @@ import (
     "fmt"
     "github.com/serialx/hashring"
     "github.com/wukong-cloud/wrpc-go/internal/discovery"
-    "github.com/wukong-cloud/wrpc-go/util/logx"
     "github.com/wukong-cloud/wrpc-go/util/uerror"
     "math"
     "net"
@@ -157,7 +156,7 @@ func (client *Client)updateConnector(addr string, isFixed bool) {
     }
     newNodes := map[string]int{}
     for _, node := range newConnectors {
-        newNodes[node.addr] = 100
+        newNodes[node.addr] = 10
     }
     client.hasher = hashring.NewWithWeights(newNodes)
     client.connectors = newConnectors
