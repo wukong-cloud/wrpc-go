@@ -3,6 +3,7 @@ package wrpc_go
 import (
     "context"
     "fmt"
+    "github.com/serialx/hashring"
     "github.com/wukong-cloud/wrpc-go/internal/discovery"
     "github.com/wukong-cloud/wrpc-go/util/logx"
     "github.com/wukong-cloud/wrpc-go/util/uerror"
@@ -89,6 +90,7 @@ type Client struct {
     reqMap map[int32]chan *Response
     rwLock sync.Mutex
     discover discovery.Discover
+    hasher *hashring.HashRing
 }
 
 func NewClient(name string, opts ...ClientOption) *Client {
@@ -99,6 +101,7 @@ func NewClient(name string, opts ...ClientOption) *Client {
         connectors: make([]*connector, 0),
         reqMap: make(map[int32]chan *Response),
         discover: discovery.NewDiscover(conf.DiscoverConfig),
+        hasher: hashring.New([]string{}),
     }
     client.opts = loadClientOptions(opts...)
     if client.opts.discover != nil {
@@ -112,9 +115,7 @@ func (client *Client)initConnect() {
     if client.opts.addr != "" {
         client.updateConnector(client.opts.addr, true)
     }
-    logx.Log(11111)
     endpoints := client.discover.Find(client.name)
-    logx.Log(222, endpoints)
     if len(endpoints) > 0 {
         client.updateConnector(strings.Join(endpoints, ";"), false)
     }
@@ -154,7 +155,11 @@ func (client *Client)updateConnector(addr string, isFixed bool) {
         }
         delConnectoers = append(delConnectoers, oldConn)
     }
-
+    newNodes := map[string]int{}
+    for _, node := range newConnectors {
+        newNodes[node.addr] = 100
+    }
+    client.hasher = hashring.NewWithWeights(newNodes)
     client.connectors = newConnectors
     client.mu.Unlock()
 
@@ -167,30 +172,55 @@ func (client *Client)updateConnector(addr string, isFixed bool) {
     }
 }
 
-func (client *Client)connector(addr string) *connector {
+func (client *Client)connector(key string, findType int) *connector {
+    switch findType {
+    case findType_addr:
+        return client.findConnector(key)
+    case findType_consistentHash:
+        return client.consistentHashConnector(key)
+    default:
+        return client.nextConnector()
+    }
+}
+
+func (client *Client)findConnector(addr string) *connector {
     var connect *connector
     client.mu.Lock()
-    if addr != "" {
-        for _, c := range client.connectors {
-            if c.addr == addr {
-                connect = c
-                break
-            }
+    for _, c := range client.connectors {
+        if c.addr == addr {
+            connect = c
+            break
         }
+    }
+    client.mu.Unlock()
+    return connect
+}
+
+func (client *Client)consistentHashConnector(key string) *connector {
+    var connect *connector
+    client.mu.Lock()
+    node, ok := client.hasher.GetNode(key)
+    if !ok {
         client.mu.Unlock()
         return connect
-    } else {
-        connectNum := len(client.connectors)
-        if connectNum == 0 {
-            client.mu.Unlock()
-            return nil
-        }
-        if client.idx >= connectNum {
-            client.idx = 0
-        }
-        connect = client.connectors[client.idx]
-        client.idx++
     }
+    client.mu.Unlock()
+    return client.findConnector(node)
+}
+
+func (client *Client)nextConnector() *connector {
+    var connect *connector
+    client.mu.Lock()
+    connectNum := len(client.connectors)
+    if connectNum == 0 {
+        client.mu.Unlock()
+        return nil
+    }
+    if client.idx >= connectNum {
+        client.idx = 0
+    }
+    connect = client.connectors[client.idx]
+    client.idx++
     client.mu.Unlock()
     return connect
 }
@@ -215,17 +245,13 @@ func (client *Client)Invoke(ctx context.Context, encName, addr, method string, i
         Body: in,
         Meta: metadata,
     }
-    bs, err := client.protocol.PacketRequest(req)
-    if err != nil {
-        return nil, err
-    }
 
     respChan := make(chan *Response, 1)
     client.rwLock.Lock()
     client.reqMap[req.RequestId] = respChan
     client.rwLock.Unlock()
 
-    err = client.sendRequest(addr, bs)
+    err := client.sendRequest(addr, req)
     if err != nil {
         client.rwLock.Lock()
         delete(client.reqMap, req.RequestId)
@@ -253,14 +279,38 @@ func (client *Client)Invoke(ctx context.Context, encName, addr, method string, i
     }
 }
 
-func (client *Client)sendRequest(addr string, bs []byte) error {
-    var err error
+const (
+    findType_next = 1
+    findType_addr = 2
+    findType_consistentHash = 3
+)
+
+func (client *Client)sendRequest(addr string, req *Request) error {
+    bs, err := client.protocol.PacketRequest(req)
+    if err != nil {
+        return  err
+    }
+
     tryTime := client.opts.reTry
     if tryTime <= 0 {
         tryTime = 1
     }
+
+    findType := findType_next
+    key := ""
+    if addr != "" {
+        key = addr
+        findType = findType_addr
+    } else if hash, ok := req.Meta[ConsistentHashKey]; ok {
+        key = hash
+        findType = findType_consistentHash
+    }
+
     for i := 0; i < tryTime; i++ {
-        connect := client.connector(addr)
+        if i > 0 && findType != findType_addr {
+            findType = findType_next
+        }
+        connect := client.connector(key, findType)
         if connect == nil {
             return ErrConnectNotFound
         }

@@ -16,7 +16,10 @@ func main() {
         wg.Add(1)
         go func(i int) {
             defer wg.Done()
-            resp, err := client.SayHello(context.TODO(), &pb.HelloReq{Name: "world " + strconv.FormatInt(int64(i), 10)})
+            meta := map[string]string{}
+            meta[wrpcgo.ConsistentHashKey] = fmt.Sprint(i)
+            ctx := wrpcgo.NewOutgoingContext(context.TODO(), meta)
+            resp, err := client.SayHello(ctx, &pb.HelloReq{Name: "world " + strconv.FormatInt(int64(i), 10)})
             if err != nil {
                 fmt.Println(err.Error())
             } else {

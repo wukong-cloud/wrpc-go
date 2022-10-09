@@ -13,6 +13,8 @@ import (
 )
 
 type Config struct {
+    BaseDir        string            `yaml:"base-dir"`
+    LogDir         string  `yaml:"log-dir"`
     DiscoverConfig *discovery.DiscoverConfig `yaml:"discover"`
     RegisterConfig *register.RegisterConfig `yaml:"register"`
     ServerConfigs []*ServerConfig `yaml:"server-config"`

@@ -32,4 +32,5 @@ func NewOutgoingContext(ctx context.Context, meta Meta) context.Context {
 
 const (
     EncodeType = "encode-type"
+    ConsistentHashKey = "consistenthash"
 )
