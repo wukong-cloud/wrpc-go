@@ -86,11 +86,16 @@ func (app *App)loop() error {
                 app.register.KeepAlive(*server.Target())
             }
         case <- app.stopChan:
+            logx.Log("ready to stop server")
             for _, server := range app.serverMap {
+                logx.Logf("stop server %s", server.Name())
                 app.register.UnRegister(*server.Target())
+                logx.Logf("stop server %s", server.Name())
                 server.Stop(context.TODO())
             }
             app.wg.Wait()
+            logx.Log("server is stopped")
+            return nil
         }
     }
 }

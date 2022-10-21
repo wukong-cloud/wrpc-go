@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+option go_package="/wrpc_go";
+
+package wrpc_go;
+
+message Response {
+    int64 request_id = 1;
+    map<string, string> meta = 2;
+    bytes body = 3;
+    int32 code = 4;
+    string code_status = 5;
+}

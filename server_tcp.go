@@ -66,6 +66,7 @@ func (srv *TcpServer)Start() error {
     logx.Logf("start rpc server %s listen %s", srv.name, srv.opts.addr)
 
     srv.listen = listen
+    srv.running = true
     srv.mu.Unlock()
 
     var tempDelay time.Duration
@@ -73,12 +74,12 @@ func (srv *TcpServer)Start() error {
     for {
         rw, err := srv.listen.Accept()
         if err != nil {
-            logx.Logf("server %s listen accept failed:%v", err)
             select {
             case <- srv.getDoneChan():
-                return ErrServerIsClosed
+                return nil
             default:
             }
+            logx.Logf("server %s listen accept failed:%v", srv.Name(), err)
             if ne, ok := err.(net.Error); ok && ne.Temporary() {
                 if tempDelay == 0 {
                     tempDelay = 5 * time.Millisecond
@@ -246,7 +247,8 @@ func (conn *tcpConn)invoke(body []byte) {
     }
 
     var resp *Response
-    encName := req.Meta.Get(EncodeType)
+    meta := Meta(req.Meta)
+    encName := meta.Get(EncodeType)
     start := time.Now()
     defer func() {
         interval := time.Now().Sub(start)
@@ -309,4 +311,20 @@ func (conn *tcpConn)invoke(body []byte) {
 func (conn *tcpConn)send(body []byte) error {
     _, err := conn.rw.Write(body)
     return err
+}
+
+func GetResponse(req *Request, bs []byte, err error) *Response {
+    resp := &Response{
+        RequestId: req.RequestId,
+        Body: bs,
+        Meta: req.Meta,
+        Code: 200,
+        CodeStatus: "ok",
+    }
+    if err != nil {
+        werr := uerror.ParseError(err)
+        resp.Code = werr.Code
+        resp.CodeStatus = werr.ErrMsg
+    }
+    return resp
 }

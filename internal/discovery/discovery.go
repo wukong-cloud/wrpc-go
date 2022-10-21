@@ -4,6 +4,7 @@ import "github.com/wukong-cloud/wrpc-go/util/logx"
 
 type Discover interface {
     Find(name string) []string
+    Watch(name string) chan []string
 }
 
 type DiscoverConfig struct {
@@ -35,3 +36,4 @@ func NewDiscover(conf *DiscoverConfig) Discover {
 
 type nopDiscover struct {}
 func (*nopDiscover)Find(name string) []string { return nil }
+func (*nopDiscover)Watch(name string) chan []string { return make(chan []string) }

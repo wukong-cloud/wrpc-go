@@ -2,7 +2,7 @@ package wrpc_go
 
 import (
     "encoding/binary"
-    "encoding/json"
+    "github.com/golang/protobuf/proto"
 )
 
 type Protocol interface {
@@ -22,7 +22,7 @@ func newWRPCProtocol() Protocol {
 }
 
 func (jp *wrpcProtocol) PacketRequest(request *Request) ([]byte, error) {
-    bs, err := json.Marshal(request)
+    bs, err := proto.Marshal(request)
     if err != nil {
         return nil, err
     }
@@ -34,7 +34,7 @@ func (jp *wrpcProtocol) PacketRequest(request *Request) ([]byte, error) {
 
 func (jp *wrpcProtocol) UnPacketRequest(body []byte) (*Request, error) {
     req := Request{}
-    err := json.Unmarshal(body[4:], &req)
+    err := proto.Unmarshal(body[4:], &req)
     if err != nil {
         return nil, err
     }
@@ -42,7 +42,7 @@ func (jp *wrpcProtocol) UnPacketRequest(body []byte) (*Request, error) {
 }
 
 func (jp *wrpcProtocol) PacketResponse(response *Response) ([]byte, error) {
-    bs, err := json.Marshal(response)
+    bs, err := proto.Marshal(response)
     if err != nil {
         return nil, err
     }
@@ -54,7 +54,7 @@ func (jp *wrpcProtocol) PacketResponse(response *Response) ([]byte, error) {
 
 func (jp *wrpcProtocol) UnPacketResponse(body []byte) (*Response, error) {
     resp := Response{}
-    err := json.Unmarshal(body[4:], &resp)
+    err := proto.Unmarshal(body[4:], &resp)
     if err != nil {
         return nil, err
     }
@@ -62,5 +62,5 @@ func (jp *wrpcProtocol) UnPacketResponse(body []byte) (*Response, error) {
 }
 
 func (jp *wrpcProtocol) Name() string {
-    return "json-protocol"
+    return "proto-protocol"
 }

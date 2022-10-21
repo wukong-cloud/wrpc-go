@@ -16,13 +16,13 @@ import (
 
 var ErrConnectNotFound = fmt.Errorf("connect not found")
 
-var requestId int32
+var requestId int64
 
-func nextRequestId() int32 {
-    if atomic.CompareAndSwapInt32(&requestId, math.MaxInt32, 1) {
+func nextRequestId() int64 {
+    if atomic.CompareAndSwapInt64(&requestId, math.MaxInt32, 1) {
         return 1
     }
-    id := atomic.AddInt32(&requestId, 1)
+    id := atomic.AddInt64(&requestId, 1)
     return id
 }
 
@@ -86,7 +86,7 @@ type Client struct {
     protocol Protocol
     idx int
     connectors []*connector
-    reqMap map[int32]chan *Response
+    reqMap map[int64]chan *Response
     rwLock sync.Mutex
     discover discovery.Discover
     hasher *hashring.HashRing
@@ -98,7 +98,7 @@ func NewClient(name string, opts ...ClientOption) *Client {
         name: name,
         protocol: newWRPCProtocol(),
         connectors: make([]*connector, 0),
-        reqMap: make(map[int32]chan *Response),
+        reqMap: make(map[int64]chan *Response),
         discover: discovery.NewDiscover(conf.DiscoverConfig),
         hasher: hashring.New([]string{}),
     }
@@ -118,6 +118,18 @@ func (client *Client)initConnect() {
     if len(endpoints) > 0 {
         client.updateConnector(strings.Join(endpoints, ";"), false)
     }
+    go func() {
+        timer := time.NewTicker(time.Second*10)
+        for {
+            select {
+            case <- timer.C:
+                endpoints := client.discover.Find(client.name)
+                client.updateConnector(strings.Join(endpoints, ";"), false)
+            case endpoints := <- client.discover.Watch(client.name):
+                client.updateConnector(strings.Join(endpoints, ";"), false)
+            }
+        }
+    }()
 }
 
 func (client *Client)updateConnector(addr string, isFixed bool) {
