@@ -5,6 +5,7 @@ import (
     "fmt"
     wrpcgo "github.com/wukong-cloud/wrpc-go"
     "github.com/wukong-cloud/wrpc-go/example/helloworld/protocol/pb"
+    "github.com/wukong-cloud/wrpc-go/util/logx"
     "strconv"
     "sync"
 )
@@ -19,16 +20,13 @@ func main() {
             meta := map[string]string{}
             meta[wrpcgo.ConsistentHashKey] = fmt.Sprint(i)
             ctx := wrpcgo.NewOutgoingContext(context.TODO(), meta)
-            resp, err := client.SayHello(ctx, &pb.HelloReq{Name: "world " + strconv.FormatInt(int64(i), 10)})
-            if err != nil {
-                fmt.Println(err.Error())
+            resps, errs := client.BroadcastSayHello(ctx, &pb.HelloReq{Name: "world " + strconv.FormatInt(int64(i), 10)})
+            if len(errs) > 0 {
+                logx.Log(logx.Kv("errss", errs))
             } else {
-                fmt.Println(i, resp.Message)
+                logx.Log(logx.Kv("resps", resps))
             }
         }(i)
     }
     wg.Wait()
-    select {
-
-    }
 }

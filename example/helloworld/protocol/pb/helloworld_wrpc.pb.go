@@ -62,7 +62,10 @@ func NewHelloClient(name string, opts ...wrpc_go.ClientOption) *HelloClient {
 }
 
 func (client *HelloClient) SayHello(ctx context.Context, req *HelloReq, opts ...map[string]string) (*HelloResp, error) {
-	bin, _ := proto.Marshal(req)
+	bin, err := proto.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
 	bs, err := client.client.Invoke(ctx, "proto", "", "SayHello", bin, opts...)
 	if err != nil {
 		return nil, err
@@ -75,7 +78,10 @@ func (client *HelloClient) SayHello(ctx context.Context, req *HelloReq, opts ...
 }
 
 func (client *HelloClient) SayHelloORI(ctx context.Context, addr string, req *HelloReq, opts ...map[string]string) (*HelloResp, error) {
-	bin, _ := proto.Marshal(req)
+	bin, err := proto.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
 	bs, err := client.client.Invoke(ctx, "proto", addr, "SayHello", bin, opts...)
 	if err != nil {
 		return nil, err
@@ -85,4 +91,29 @@ func (client *HelloClient) SayHelloORI(ctx context.Context, addr string, req *He
 		return nil, err
 	}
 	return resp, nil
+}
+
+func (client *HelloClient) BroadcastSayHello(ctx context.Context, req *HelloReq, opts ...map[string]string) (map[string]*HelloResp, map[string]error) {
+	var resps = make(map[string]*HelloResp)
+	var errs = make(map[string]error)
+	bin, err := proto.Marshal(req)
+	if err != nil {
+		errs["marshalErr"] = err
+		return nil, errs
+	}
+	addrs := client.client.GetAllEndpoints()
+	for _, addr := range addrs {
+		bs, err := client.client.Invoke(ctx, "proto", addr, "SayHello", bin, opts...)
+		if err != nil {
+			errs[addr] = err
+		} else {
+			resp := &HelloResp{}
+			if err := proto.Unmarshal(bs, resp); err != nil {
+				errs[addr] = err
+			} else {
+				resps[addr] = resp
+			}
+		}
+	}
+	return resps, errs
 }

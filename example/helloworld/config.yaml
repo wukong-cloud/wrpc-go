@@ -7,7 +7,7 @@ register:
 server-config:
   - name: HelloServer
     ip: 127.0.0.1
-    port: 9092
+    port: 9093
 client-config:
   thread: 2
   retry: 2

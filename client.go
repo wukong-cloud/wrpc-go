@@ -236,6 +236,16 @@ func (client *Client)nextConnector() *connector {
     return connect
 }
 
+func (client *Client)GetAllEndpoints() []string {
+    addrs := make([]string, 0)
+    client.mu.Lock()
+    for _, connect := range client.connectors {
+        addrs = append(addrs, connect.addr)
+    }
+    client.mu.Unlock()
+    return addrs
+}
+
 func (client *Client)Invoke(ctx context.Context, encName, addr, method string, in []byte, opt ...map[string]string) ([]byte, error) {
     var cancel context.CancelFunc
     if client.opts.requestTimeout > 0 {
